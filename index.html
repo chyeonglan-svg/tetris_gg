@@ -1,3 +1,12 @@
+이전 요청에서 언급하셨던 HTML, CSS, JavaScript를 통합하여 **Tetris 게임**을 구현하는 하나의 코드를 작성해 드리겠습니다.
+
+이 코드는 \*\*HTML5 `<canvas>`\*\*를 사용하여 게임 보드를 렌더링하고, 기본적인 움직임, 회전, 줄 제거 로직을 포함하고 있습니다.
+
+이 코드를 `index.html` 파일로 저장하고 웹 브라우저에서 열어보세요.
+
+### 🕹️ 통합 테트리스 게임 코드 (HTML, CSS, JavaScript)
+
+```html
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -64,3 +73,412 @@
         /* CSS 스타일 끝 */
     </style>
 </head>
+<body>
+
+    <h1>🧱 Tetris (테트리스) 🧱</h1>
+
+    <div class="game-container">
+        <canvas id="board"></canvas>
+
+        <div class="info-panel">
+            <div class="info-box">
+                <h3>SCORE</h3>
+                <p id="score">0</p>
+            </div>
+            <div class="info-box">
+                <h3>NEXT</h3>
+                <canvas id="next-piece-canvas"></canvas>
+            </div>
+            <div class="info-box">
+                <h3>LEVEL</h3>
+                <p id="level">1</p>
+            </div>
+        </div>
+    </div>
+
+    <p style="margin-top: 20px;">
+        **조작법:** ⬅️ 좌, ➡️ 우, ⬇️ 아래, ⬆️ 회전
+    </p>
+
+    <script>
+        // JavaScript 로직 시작
+
+        // 1. 설정 및 초기화
+        const COLS = 10; // 열 개수
+        const ROWS = 20; // 행 개수
+        const BLOCK_SIZE = 30; // 블록 하나의 크기 (픽셀)
+
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const levelElement = document.getElementById('level');
+
+        // 캔버스 크기 설정
+        canvas.width = COLS * BLOCK_SIZE;
+        canvas.height = ROWS * BLOCK_SIZE;
+
+        // 게임 변수
+        let board = createBoard(); // 2차원 배열 보드
+        let currentPiece = null;
+        let nextPiece = createPiece();
+        let score = 0;
+        let level = 1;
+        let dropInterval = 1000; // 블록 떨어지는 시간 (ms)
+        let lastTime = 0;
+        let gameOver = false;
+
+        // 테트로미노 정의 (모양과 색상)
+        // 0: 빈 공간
+        const SHAPES = [
+            // I-Block (Cyan)
+            [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]],
+            // J-Block (Blue)
+            [[2, 0, 0], [2, 2, 2], [0, 0, 0]],
+            // L-Block (Orange)
+            [[0, 0, 3], [3, 3, 3], [0, 0, 0]],
+            // O-Block (Yellow)
+            [[4, 4], [4, 4]],
+            // S-Block (Green)
+            [[0, 5, 5], [5, 5, 0], [0, 0, 0]],
+            // T-Block (Purple)
+            [[0, 6, 0], [6, 6, 6], [0, 0, 0]],
+            // Z-Block (Red)
+            [[7, 7, 0], [0, 7, 7], [0, 0, 0]]
+        ];
+
+        const COLORS = [
+            '#000000', // 0: Background
+            '#00FFFF', // 1: I-Block (Cyan)
+            '#0000FF', // 2: J-Block (Blue)
+            '#FFA500', // 3: L-Block (Orange)
+            '#FFFF00', // 4: O-Block (Yellow)
+            '#00FF00', // 5: S-Block (Green)
+            '#800080', // 6: T-Block (Purple)
+            '#FF0000'  // 7: Z-Block (Red)
+        ];
+
+        // 2. 핵심 함수
+
+        /**
+         * 10x20 크기의 빈 게임 보드를 생성합니다.
+         */
+        function createBoard() {
+            const matrix = [];
+            while (matrix.length < ROWS) {
+                matrix.push(new Array(COLS).fill(0));
+            }
+            return matrix;
+        }
+
+        /**
+         * 무작위로 새로운 테트로미노 조각을 생성하고 초기 위치를 설정합니다.
+         */
+        function createPiece() {
+            const type = Math.floor(Math.random() * SHAPES.length);
+            const shape = SHAPES[type];
+            const colorIndex = type + 1; // 1~7 사이의 색상 인덱스
+            
+            return {
+                shape: shape,
+                colorIndex: colorIndex,
+                x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
+                y: 0
+            };
+        }
+
+        /**
+         * 보드와 현재 조각을 캔버스에 그립니다.
+         */
+        function draw() {
+            // 배경 그리기
+            ctx.fillStyle = COLORS[0]; // 검은색 배경
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 고정된 보드 블록 그리기
+            drawMatrix(board, { x: 0, y: 0 });
+
+            // 현재 움직이는 조각 그리기
+            if (currentPiece) {
+                drawMatrix(currentPiece.shape, currentPiece);
+            }
+        }
+
+        /**
+         * 주어진 매트릭스(조각 또는 보드)를 캔버스에 그립니다.
+         */
+        function drawMatrix(matrix, offset) {
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        ctx.fillStyle = COLORS[value];
+                        ctx.fillRect(
+                            (offset.x + x) * BLOCK_SIZE,
+                            (offset.y + y) * BLOCK_SIZE,
+                            BLOCK_SIZE,
+                            BLOCK_SIZE
+                        );
+                        // 블록 경계선 (선택 사항)
+                        ctx.strokeStyle = '#2c3e50';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(
+                            (offset.x + x) * BLOCK_SIZE,
+                            (offset.y + y) * BLOCK_SIZE,
+                            BLOCK_SIZE,
+                            BLOCK_SIZE
+                        );
+                    }
+                });
+            });
+        }
+
+        /**
+         * 충돌 감지 로직: 현재 조각이 보드의 경계를 벗어나거나 이미 고정된 블록과 겹치는지 확인합니다.
+         */
+        function collide(board, piece) {
+            const [matrix, x, y] = [piece.shape, piece.x, piece.y];
+            for (let r = 0; r < matrix.length; r++) {
+                for (let c = 0; c < matrix[r].length; c++) {
+                    if (matrix[r][c] !== 0) {
+                        // 1. 보드의 경계를 벗어나는가? (좌/우/하단)
+                        // 2. 보드에 이미 블록이 있는 위치인가?
+                        if (
+                            c + x < 0 || // 왼쪽 경계
+                            c + x >= COLS || // 오른쪽 경계
+                            r + y >= ROWS || // 아래쪽 경계
+                            (r + y >= 0 && board[r + y][c + x] !== 0) // 기존 블록과 충돌
+                        ) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * 현재 조각을 보드에 병합(고정)시킵니다.
+         */
+        function merge(board, piece) {
+            piece.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        board[piece.y + y][piece.x + x] = value;
+                    }
+                });
+            });
+            updateScoreAndLevel();
+        }
+
+        /**
+         * 조각을 한 칸 아래로 떨어뜨립니다.
+         */
+        function dropPiece() {
+            if (gameOver) return;
+            currentPiece.y++;
+            if (collide(board, currentPiece)) {
+                currentPiece.y--; // 충돌했으므로 한 칸 위로 되돌리기
+                merge(board, currentPiece);
+                clearLines();
+                
+                // 다음 조각 생성 및 게임 오버 체크
+                currentPiece = nextPiece;
+                nextPiece = createPiece();
+                drawNextPiece();
+                
+                // 새로운 조각이 생성되자마자 충돌하면 게임 오버
+                if (collide(board, currentPiece)) {
+                    gameOver = true;
+                    alert(`Game Over! 최종 점수: ${score}`);
+                }
+            }
+        }
+
+        /**
+         * 완성된 줄을 찾고 제거한 후 점수를 업데이트합니다.
+         */
+        function clearLines() {
+            let linesCleared = 0;
+            outer: for (let y = ROWS - 1; y >= 0; y--) {
+                for (let x = 0; x < COLS; x++) {
+                    if (board[y][x] === 0) {
+                        continue outer; // 이 줄은 완성되지 않았으므로 다음 줄로 이동
+                    }
+                }
+                
+                // 줄 완성!
+                linesCleared++;
+                const row = board.splice(y, 1)[0].fill(0); // 완성된 줄 제거
+                board.unshift(row); // 맨 위에 빈 줄 추가
+                y++; // 줄이 내려왔으므로 현재 줄을 다시 검사
+            }
+            
+            // 점수 계산 (Tetris 공식 사용)
+            if (linesCleared > 0) {
+                const points = [0, 40, 100, 300, 1200][linesCleared];
+                score += points * level; // 레벨에 따라 점수 가중치
+            }
+        }
+        
+        /**
+         * 점수와 레벨을 업데이트하고, 레벨에 따라 떨어지는 속도를 조정합니다.
+         */
+        function updateScoreAndLevel() {
+            scoreElement.textContent = score;
+
+            // 단순화된 레벨업 조건 (예: 1000점마다 레벨업)
+            const newLevel = Math.floor(score / 1000) + 1;
+            if (newLevel > level) {
+                level = newLevel;
+                levelElement.textContent = level;
+                dropInterval = Math.max(100, 1000 - (level - 1) * 100); // 최소 100ms
+            }
+        }
+
+
+        /**
+         * 조각을 회전시킵니다. (시계 방향)
+         */
+        function rotate(piece) {
+            // 행렬 전치 (Transpose)
+            for (let y = 0; y < piece.shape.length; ++y) {
+                for (let x = 0; x < y; ++x) {
+                    [
+                        piece.shape[x][y],
+                        piece.shape[y][x],
+                    ] = [
+                        piece.shape[y][x],
+                        piece.shape[x][y],
+                    ];
+                }
+            }
+
+            // 행 반전 (Reverse rows)
+            piece.shape.forEach(row => row.reverse());
+        }
+
+        /**
+         * 회전 시 벽에 끼이는 것을 방지하기 위해 위치를 조정합니다.
+         */
+        function rotatePiece() {
+            const originalX = currentPiece.x;
+            let offset = 1;
+            
+            rotate(currentPiece);
+            
+            // Wall Kick (벽차기) 구현 (간소화 버전)
+            while (collide(board, currentPiece)) {
+                currentPiece.x += offset;
+                offset = -(offset + (offset > 0 ? 1 : -1));
+                // 너무 많이 이동하면 회전을 취소합니다.
+                if (offset > currentPiece.shape[0].length) {
+                    // 회전을 3번 더하여 원래 모양으로 되돌립니다. (총 4회전)
+                    rotate(currentPiece); 
+                    rotate(currentPiece);
+                    rotate(currentPiece);
+                    currentPiece.x = originalX;
+                    return;
+                }
+            }
+        }
+        
+        /**
+         * 다음 조각 미리보기 캔버스에 그리기
+         */
+        function drawNextPiece() {
+            const nextCanvas = document.getElementById('next-piece-canvas');
+            const nextCtx = nextCanvas.getContext('2d');
+            
+            // 캔버스 크기 설정 (대부분의 조각이 3x3이므로 4x4 크기로 설정)
+            const nextSize = 4;
+            nextCanvas.width = nextSize * BLOCK_SIZE / 2;
+            nextCanvas.height = nextSize * BLOCK_SIZE / 2;
+
+            nextCtx.fillStyle = '#34495e'; // 배경색
+            nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+
+            const matrix = nextPiece.shape;
+            matrix.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value !== 0) {
+                        nextCtx.fillStyle = COLORS[value];
+                        // 미리보기 캔버스에서는 크기를 절반으로 줄여서 그립니다.
+                        nextCtx.fillRect(
+                            x * (BLOCK_SIZE / 2),
+                            y * (BLOCK_SIZE / 2),
+                            BLOCK_SIZE / 2,
+                            BLOCK_SIZE / 2
+                        );
+                        nextCtx.strokeStyle = '#2c3e50';
+                        nextCtx.lineWidth = 1;
+                        nextCtx.strokeRect(
+                            x * (BLOCK_SIZE / 2),
+                            y * (BLOCK_SIZE / 2),
+                            BLOCK_SIZE / 2,
+                            BLOCK_SIZE / 2
+                        );
+                    }
+                });
+            });
+        }
+
+
+        // 3. 게임 루프 및 이벤트 처리
+
+        /**
+         * 메인 게임 루프 (애니메이션)
+         */
+        function update(time = 0) {
+            if (gameOver) return;
+
+            const deltaTime = time - lastTime;
+            lastTime = time;
+
+            // 일정 시간이 지나면 블록을 떨어뜨립니다.
+            if (deltaTime > dropInterval) {
+                dropPiece();
+                lastTime = time; // 드롭 후 시간 초기화
+            }
+
+            draw(); // 화면 그리기
+            requestAnimationFrame(update); // 다음 프레임 요청
+        }
+
+        /**
+         * 키보드 이벤트 핸들러
+         */
+        document.addEventListener('keydown', event => {
+            if (gameOver) return;
+
+            switch (event.key) {
+                case 'ArrowLeft': // 왼쪽
+                    currentPiece.x--;
+                    if (collide(board, currentPiece)) {
+                        currentPiece.x++; // 충돌하면 되돌리기
+                    }
+                    break;
+                case 'ArrowRight': // 오른쪽
+                    currentPiece.x++;
+                    if (collide(board, currentPiece)) {
+                        currentPiece.x--;
+                    }
+                    break;
+                case 'ArrowDown': // 아래 (빨리 떨어뜨리기)
+                    dropPiece();
+                    break;
+                case 'ArrowUp': // 회전
+                    rotatePiece();
+                    break;
+            }
+        });
+
+        // 4. 게임 시작
+        currentPiece = createPiece();
+        drawNextPiece();
+        update(); // 게임 루프 시작
+
+        // JavaScript 로직 끝
+    </script>
+
+</body>
+</html>
+```
